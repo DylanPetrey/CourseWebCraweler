@@ -73,7 +73,7 @@ def fill_course_object():
 
 def create_json():
     with open('cs_catalog.json', 'w') as output_JSON:
-        json.dump(data, output_JSON, ensure_ascii=False, indent=4)
+        json.dump(data, output_JSON, ensure_ascii=False, indent=4, sort_keys=True)
         output_JSON.close()
         print(len(data))
 
@@ -83,6 +83,12 @@ def clean_course_list() -> dict:
     for key in data.keys():
         if key == "":
             continue
+
+        # Include for graduate courses
+        #if key[-4] != "6" and key[-4] != "5":
+        #    continue
+
+        # Include for CS courses
         if ('CS' in key or 'SE' in key or 'ECS' in key or 'ECSC' in key)\
                 and not ('MSEN' in key or 'SYSE' in key or 'HCS' in key or 'EECS' in key
                          or 'SOCS' in key or 'ISEC' in key or 'EPCS' in key):
