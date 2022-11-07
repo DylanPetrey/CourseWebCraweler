@@ -3,6 +3,7 @@ import re
 
 import requests
 import pickle
+import json
 
 from bs4 import BeautifulSoup, SoupStrainer
 from nltk import word_tokenize
@@ -49,7 +50,7 @@ def scrape_text(list_of_urls):
             f.write("\n".join(text))
             f.close()
 
-            print('Year ' + str(year) + ' ' + course_prefix)
+            print('Year ' + str(year) + ' ' + plan + ' ' + course_prefix)
 
 
 def fill_course_object():
@@ -66,47 +67,40 @@ def fill_course_object():
                     course_set.add(current_course.course_number)
                     course_list.append(current_course)
                     current_course.print()
+                    data[current_course.course_number] = json.loads(current_course.obj_to_json())
             f.close()
 
 
 def create_json():
-    with open('course_catalog.json', 'w') as f:
-        f.write('{\n')
-        for index, current_course in enumerate(course_list):
-            f.write('\t\"' + current_course.course_number + '\": {\n')
-            f.write('\t\t\"Title\": ' + '\"' + current_course.course_title + '\",\n')
-            f.write('\t\t\"Year\": ' + '\"' + current_course.course_year + '\",\n')
-            f.write('\t\t\"Equivalent\": ')
-            if not len(current_course.course_equivalent) > 0:
-                f.write('"",\n')
-            else:
-                f.write("\"")
-                for i, c in enumerate(current_course.course_equivalent):
-                    f.write(c)
-                    if i+1 != len(current_course.course_equivalent):
-                        f.write(" | ")
-                f.write("\",\n")
-            f.write('\t\t\"Prerequisite\": ')
-            if not len(current_course.course_pre) > 0:
-                f.write('""\n')
-            else:
-                f.write("\"" + current_course.course_pre + "\"\n")
-            if index != len(course_list)-1:
-                f.write('\t},\n')
-            else:
-                f.write('\t}\n')
-        f.write('}')
-        f.close()
+    with open('cs_catalog.json', 'w') as output_JSON:
+        json.dump(data, output_JSON, ensure_ascii=False, indent=4)
+        output_JSON.close()
+        print(len(data))
 
 
-def clean_course_list(list_of_courses) -> list:
-    new_list = []
-    for course in list_of_courses:
-        if len(course.course_number) < 5:
+def clean_course_list() -> dict:
+    newDict = dict()
+    for key in data.keys():
+        if key == "":
             continue
-        if course.course_number[-4] == '6' or course.course_number[-4] == '5':
-            new_list.append(course)
-    return new_list
+        if ('CS' in key or 'SE' in key or 'ECS' in key or 'ECSC' in key)\
+                and not ('MSEN' in key or 'SYSE' in key or 'HCS' in key or 'EECS' in key
+                         or 'SOCS' in key or 'ISEC' in key or 'EPCS' in key):
+            newDict[key] = data[key]
+    return newDict
+
+def removeStringJunk(curr) -> str:
+    curr = curr.replace(' ,', ',')
+    curr = curr.replace(' .', '.')
+    curr = curr.replace(' :', ':')
+    curr = curr.replace(' ;', ';')
+    curr = curr.replace(" \'", "\'")
+    curr = curr.replace('( ', '(')
+    curr = curr.replace(' )', ')')
+    curr = curr.replace('[ ', '[')
+    curr = curr.replace(' ]', ']')
+    curr = curr.replace(' - ', '-')
+    return curr
 
 
 if __name__ == '__main__':
@@ -114,8 +108,8 @@ if __name__ == '__main__':
         course_number = ""
         course_title = ""
         course_year = ""
-        course_equivalent = []
-        course_pre = []
+        course_hours = ""
+        course_description = ""
 
         def __init__(self):
             self.course_year = year
@@ -131,6 +125,10 @@ if __name__ == '__main__':
             if len(tokens) < 1:
                 return
             self.course_number = tokens[0] + ' ' + tokens[1]
+            self.course_number = self.course_number.upper()
+            if self.course_number in course_set:
+                return
+
             tokens = tokens[2:]
 
             # Equivalent Names
@@ -143,26 +141,34 @@ if __name__ == '__main__':
             # Course Title
             end_of_title_index = tokens.index('(')
             self.course_title = " ".join(tokens[0:end_of_title_index])
-            self.course_title.replace(' , ', ', ')
+            self.course_title = removeStringJunk(self.course_title)
+            self.course_title = self.course_title
             tokens = tokens[end_of_title_index:]
 
-            # Course Prereq
-            if 'Prerequisite' in tokens or 'Prerequisites' in tokens:
-                if not re.search('([A-Z]{2,4} (([0-9]{4})|([0-9][vV]([0-9]{2}))|([0-9]-{3})))', " ".join(tokens)):
-                    return
-                pre_pattern = '([A-Z]{2,4} (([0-9]{4})|([0-9][vV]([0-9]{2}))|([0-9]-{3})){1})|or|and|either|,|\(|\)'
-                if 'Prerequisite' in tokens:
-                    end_of_pre_index = tokens.index('Prerequisite')
-                else:
-                    end_of_pre_index = tokens.index('Prerequisites')
-                tokens = tokens[end_of_pre_index + 2:len(tokens) - 4]
-                res = ''
-                for m in re.finditer(pre_pattern, " ".join(tokens)):
-                    res += m.group() + ' '
-                res.replace('|', 'or')
-                res.replace('&', 'and')
+            if tokens[0] == '(':
+                end_index = tokens.index(')') + 1
+                self.course_hours = " ".join(tokens[1:end_index - 1])
+                self.course_hours = self.course_hours.replace("semester", "")
+                self.course_hours = self.course_hours.replace("credit", "")
+                self.course_hours = self.course_hours.replace("hours", "")
+                self.course_hours = self.course_hours.replace("hour", "")
+                self.course_hours = self.course_hours.replace(" ", "")
+                tokens = tokens[end_index:]
 
-                self.course_pre = res
+            # Course Prereq
+            minIndex = len(tokens)
+            if 'Prerequisite' in tokens:
+                minIndex = min(tokens.index('Prerequisite'), minIndex)
+            if 'Prerequisites' in tokens:
+                minIndex = min(tokens.index('Prerequisites'), minIndex)
+            if 'Corequisite' in tokens:
+                minIndex = min(tokens.index('Corequisite'), minIndex)
+            if 'Corequisites' in tokens:
+                minIndex = min(tokens.index('Corequisites'), minIndex)
+            tokens = tokens[:minIndex]
+            self.course_description = " ".join(tokens)
+            self.course_description = removeStringJunk(self.course_description)
+            self.course_description = re.sub(" \((\d|\[\d-\d\] )-(\d|\[\d-\d\])\) \w", "", self.course_description)
 
         def get_course_nums(self, tokens: list, pattern: str) -> list:
             opt_token = ' '.join(tokens)
@@ -170,35 +176,45 @@ if __name__ == '__main__':
             course_tokens = [num[0] for num in course_tokens]
             return course_tokens
 
+        def obj_to_json(self) -> dict:
+            dictionary = {
+                'Title': self.course_title,
+                'Description': self.course_description,
+                'Hours': self.course_hours,
+                'Year': self.course_year
+            }
+            temp = json.dumps(dictionary)
+            return temp
+
         def print(self):
-            print(self.course_number + ' ' + self.course_title, end=' ')
-            if len(self.course_equivalent) > 0:
-                print(self.course_equivalent)
-            if len(self.course_pre) > 0:
-                print(self.course_pre)
+            print(self.course_number + ' ' + self.course_title + ' hours:' + self.course_hours)
 
 
     course_list = []
     course_set = set()
+    data = {}
     for year in range(2022, 2012, -1):
-        curr_url = "https://catalog.utdallas.edu/" + str(year) + "/graduate/courses/school"
+        for plan in ["graduate", "undergraduate"]:
+            curr_url = "https://catalog.utdallas.edu/" + str(year) + "/" + plan + "/courses/school"
 
-        if not os.path.exists('pickle_files/urls_' + str(year)):
-            os.makedirs('pickle_files/urls_' + str(year))
+            if not os.path.exists('pickle_files/' + plan + '/urls_' + str(year) + '.pickle'):
+                if not os.path.exists('pickle_files/' + plan):
+                    os.makedirs('pickle_files/' + plan)
 
-            urls = extract_urls(curr_url)
-            with open('pickle_files/urls_' + str(year) + '.pickle', 'wb') as handle:
-                pickle.dump(urls, handle)
-                handle.close()
-        else:
-            with open('pickle_files/urls_' + str(year) + '.pickle', 'rb') as handle:
-                urls = pickle.load(handle)
-                handle.close()
+                urls = extract_urls(curr_url)
+                with open('pickle_files/' + plan + '/urls_' + str(year) + '.pickle', 'wb') as handle:
+                    pickle.dump(urls, handle)
+                    handle.close()
+            else:
+                with open('pickle_files/' + plan + '/urls_' + str(year) + '.pickle', 'rb') as handle:
+                    urls = pickle.load(handle)
+                    handle.close()
 
-        directory = 'Courses/' + str(year)
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-            scrape_text(urls)
-        fill_course_object()
-    course_list = clean_course_list(course_list)
+            directory = 'Courses/' + plan + '/' + str(year)
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+                scrape_text(urls)
+            fill_course_object()
+    data.pop("", None)
+    data = clean_course_list()
     create_json()
